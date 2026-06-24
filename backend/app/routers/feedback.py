@@ -1,0 +1,73 @@
+import logging
+import uuid
+
+import asyncpg
+from fastapi import APIRouter, Depends
+
+from app.auth.deps import get_current_user_id
+from app.database import get_pool_dep
+from app.exceptions import AppError
+from app.repositories import messages as messages_repo
+from app.repositories import sessions as sessions_repo
+from app.schemas.feedback import FeedbackResponse
+from app.services.feedback_service import generate_feedback
+from app.services.openai_service import is_openai_configured
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/sessions", tags=["feedback"])
+
+
+async def _get_owned_completed_session(
+    *,
+    pool: asyncpg.Pool,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> sessions_repo.SessionRecord:
+    session = await sessions_repo.get_session(pool, session_id)
+    if session is None:
+        raise AppError("SESSION_NOT_FOUND", "Session not found", 404)
+    if session.user_id != user_id:
+        raise AppError("FORBIDDEN", "You do not have access to this session", 403)
+    if session.status != "completed":
+        raise AppError("SESSION_NOT_COMPLETED", "Session must be completed", 400)
+    return session
+
+
+@router.post("/{session_id}/feedback", response_model=FeedbackResponse)
+async def create_feedback(
+    session_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool_dep),
+) -> FeedbackResponse:
+    await _get_owned_completed_session(
+        pool=pool,
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+    if not is_openai_configured():
+        raise AppError(
+            "OPENAI_NOT_CONFIGURED",
+            "OpenAI API key is not configured",
+            503,
+        )
+
+    message_records = await messages_repo.list_messages_for_feedback(pool, session_id)
+    if not message_records:
+        raise AppError(
+            "MESSAGES_NOT_FOUND",
+            "No messages found for this session",
+            400,
+        )
+
+    # NOTE:
+    # OpenAIに渡す入力を role/content の最小情報に限定し、
+    # タイムスタンプやIDなど評価に不要な情報を除いてトークン消費を抑える。
+    conversation = [
+        {"role": record.role, "content": record.content}
+        for record in message_records
+    ]
+    feedback = await generate_feedback(conversation)
+    logger.info("Feedback generated", extra={"user_id": str(user_id)})
+    return feedback

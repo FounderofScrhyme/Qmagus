@@ -1,0 +1,73 @@
+from functools import lru_cache
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalize_async_database_url(url: str) -> str:
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query, keep_blank_values=True)
+
+    if "sslmode" in query:
+        query.pop("sslmode", None)
+        query["ssl"] = ["require"]
+
+    query.pop("channel_binding", None)
+
+    flat_query = {key: values[-1] for key, values in query.items() if values}
+    return urlunparse(parsed._replace(query=urlencode(flat_query)))
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=("../.env", ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    database_url: str = Field(alias="DATABASE_URL")
+    database_url_raw: str = Field(alias="DATABASE_URL_RAW")
+    openai_api_key: str = Field(alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+    jwt_secret: str = Field(alias="JWT_SECRET")
+    jwt_lifetime_seconds: int = Field(default=3600, alias="JWT_LIFETIME_SECONDS")
+    cors_origins: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
+    login_rate_limit_window_seconds: int = Field(default=60, alias="LOGIN_RATE_LIMIT_WINDOW_SECONDS")
+    login_rate_limit_max_attempts: int = Field(default=10, alias="LOGIN_RATE_LIMIT_MAX_ATTEMPTS")
+    password_min_length: int = Field(default=8, alias="PASSWORD_MIN_LENGTH")
+    session_list_default_limit: int = Field(default=20, alias="SESSION_LIST_DEFAULT_LIMIT")
+    session_list_max_limit: int = Field(default=100, alias="SESSION_LIST_MAX_LIMIT")
+    message_list_default_limit: int = Field(default=50, alias="MESSAGE_LIST_DEFAULT_LIMIT")
+    message_list_max_limit: int = Field(default=200, alias="MESSAGE_LIST_MAX_LIMIT")
+    saved_item_list_default_limit: int = Field(default=50, alias="SAVED_ITEM_LIST_DEFAULT_LIMIT")
+    saved_item_list_max_limit: int = Field(default=200, alias="SAVED_ITEM_LIST_MAX_LIMIT")
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 64:
+            raise ValueError("JWT_SECRET must be at least 64 characters long")
+        if "your-random-secret" in normalized.lower():
+            raise ValueError("JWT_SECRET must not use placeholder values")
+        return normalized
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def database_url_async(self) -> str:
+        return _normalize_async_database_url(self.database_url)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
