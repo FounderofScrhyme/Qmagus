@@ -8,8 +8,10 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app.auth.deps import get_current_user_id
+from app.config import settings
 from app.database import get_pool_dep
 from app.exceptions import AppError
+from app.rate_limit import check_rate_limit
 from app.repositories import messages as messages_repo
 from app.repositories import sessions as sessions_repo
 from app.schemas.messages import MessageCreate
@@ -56,6 +58,33 @@ async def create_message_and_stream_reply(
         session_id=session_id,
         user_id=user_id,
     )
+    user_key = str(user_id)
+    limited_minute = await check_rate_limit(
+        pool=pool,
+        scope="openai:messages:minute",
+        subject=user_key,
+        limit=settings.openai_message_rate_limit_per_minute,
+        window_seconds=60,
+    )
+    if limited_minute:
+        raise AppError(
+            "RATE_LIMITED",
+            "Message rate limit exceeded. Please try again later.",
+            429,
+        )
+    limited_day = await check_rate_limit(
+        pool=pool,
+        scope="openai:messages:day",
+        subject=user_key,
+        limit=settings.openai_message_rate_limit_per_day,
+        window_seconds=86400,
+    )
+    if limited_day:
+        raise AppError(
+            "RATE_LIMITED_DAILY",
+            "Daily message limit exceeded.",
+            429,
+        )
 
     if not is_openai_configured():
         raise AppError(

@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from app.config import settings
+
 
 class SessionStatus(StrEnum):
     ACTIVE = "active"
@@ -11,7 +13,7 @@ class SessionStatus(StrEnum):
 
 
 class SessionCreate(BaseModel):
-    scenario_text: str = Field(min_length=1)
+    scenario_text: str = Field(min_length=1, max_length=settings.scenario_text_max_length)
 
 
 class MessageRead(BaseModel):

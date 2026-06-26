@@ -14,6 +14,10 @@ class SavedItemCreate(BaseModel):
     explanation: str = Field(min_length=1, max_length=4000)
 
 
+class SavedItemsBatchCreate(BaseModel):
+    items: list[SavedItemCreate] = Field(min_length=1, max_length=100)
+
+
 class SavedItemRead(BaseModel):
     id: uuid.UUID
     session_id: uuid.UUID

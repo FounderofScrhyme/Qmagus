@@ -36,9 +36,44 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(alias="JWT_SECRET")
     jwt_lifetime_seconds: int = Field(default=3600, alias="JWT_LIFETIME_SECONDS")
     cors_origins: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
+    trust_x_forwarded_for: bool = Field(default=False, alias="TRUST_X_FORWARDED_FOR")
+
+    sqlalchemy_pool_size: int = Field(default=5, alias="SQLALCHEMY_POOL_SIZE")
+    sqlalchemy_max_overflow: int = Field(default=5, alias="SQLALCHEMY_MAX_OVERFLOW")
+    asyncpg_pool_min_size: int = Field(default=1, alias="ASYNCPG_POOL_MIN_SIZE")
+    asyncpg_pool_max_size: int = Field(default=10, alias="ASYNCPG_POOL_MAX_SIZE")
+
     login_rate_limit_window_seconds: int = Field(default=60, alias="LOGIN_RATE_LIMIT_WINDOW_SECONDS")
     login_rate_limit_max_attempts: int = Field(default=10, alias="LOGIN_RATE_LIMIT_MAX_ATTEMPTS")
+    register_rate_limit_window_seconds: int = Field(
+        default=300,
+        alias="REGISTER_RATE_LIMIT_WINDOW_SECONDS",
+    )
+    register_rate_limit_max_attempts: int = Field(
+        default=10,
+        alias="REGISTER_RATE_LIMIT_MAX_ATTEMPTS",
+    )
+
+    openai_message_rate_limit_per_minute: int = Field(
+        default=20,
+        alias="OPENAI_MESSAGE_RATE_LIMIT_PER_MINUTE",
+    )
+    openai_message_rate_limit_per_day: int = Field(
+        default=200,
+        alias="OPENAI_MESSAGE_RATE_LIMIT_PER_DAY",
+    )
+    openai_feedback_rate_limit_per_minute: int = Field(
+        default=10,
+        alias="OPENAI_FEEDBACK_RATE_LIMIT_PER_MINUTE",
+    )
+    openai_feedback_rate_limit_per_day: int = Field(
+        default=50,
+        alias="OPENAI_FEEDBACK_RATE_LIMIT_PER_DAY",
+    )
+
     password_min_length: int = Field(default=8, alias="PASSWORD_MIN_LENGTH")
+    scenario_text_max_length: int = Field(default=2000, alias="SCENARIO_TEXT_MAX_LENGTH")
+    feedback_message_max_count: int = Field(default=100, alias="FEEDBACK_MESSAGE_MAX_COUNT")
     session_list_default_limit: int = Field(default=20, alias="SESSION_LIST_DEFAULT_LIMIT")
     session_list_max_limit: int = Field(default=100, alias="SESSION_LIST_MAX_LIMIT")
     message_list_default_limit: int = Field(default=50, alias="MESSAGE_LIST_DEFAULT_LIMIT")

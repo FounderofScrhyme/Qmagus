@@ -5,6 +5,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
 COPY pyproject.toml .
 COPY app ./app
 
@@ -12,6 +14,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
 COPY . .
+RUN chown -R appuser:appgroup /app
+
+USER appuser
 
 EXPOSE 8000
 

@@ -2,10 +2,9 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from openai import AsyncOpenAI
-
 from app.config import settings
 from app.schemas.feedback import FeedbackResponse
+from app.services.openai_client import get_openai_client
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "feedback.txt"
 
@@ -28,7 +27,7 @@ def _build_transcript(messages: list[dict[str, str]]) -> str:
 
 
 async def generate_feedback(messages: list[dict[str, str]]) -> FeedbackResponse:
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    client = get_openai_client()
     transcript = _build_transcript(messages)
 
     response = await client.chat.completions.create(

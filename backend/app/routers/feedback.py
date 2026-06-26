@@ -5,8 +5,10 @@ import asyncpg
 from fastapi import APIRouter, Depends
 
 from app.auth.deps import get_current_user_id
+from app.config import settings
 from app.database import get_pool_dep
 from app.exceptions import AppError
+from app.rate_limit import check_rate_limit
 from app.repositories import messages as messages_repo
 from app.repositories import sessions as sessions_repo
 from app.schemas.feedback import FeedbackResponse
@@ -45,6 +47,33 @@ async def create_feedback(
         session_id=session_id,
         user_id=user_id,
     )
+    user_key = str(user_id)
+    limited_minute = await check_rate_limit(
+        pool=pool,
+        scope="openai:feedback:minute",
+        subject=user_key,
+        limit=settings.openai_feedback_rate_limit_per_minute,
+        window_seconds=60,
+    )
+    if limited_minute:
+        raise AppError(
+            "RATE_LIMITED",
+            "Feedback rate limit exceeded. Please try again later.",
+            429,
+        )
+    limited_day = await check_rate_limit(
+        pool=pool,
+        scope="openai:feedback:day",
+        subject=user_key,
+        limit=settings.openai_feedback_rate_limit_per_day,
+        window_seconds=86400,
+    )
+    if limited_day:
+        raise AppError(
+            "RATE_LIMITED_DAILY",
+            "Daily feedback limit exceeded.",
+            429,
+        )
 
     if not is_openai_configured():
         raise AppError(
@@ -53,7 +82,11 @@ async def create_feedback(
             503,
         )
 
-    message_records = await messages_repo.list_messages_for_feedback(pool, session_id)
+    message_records = await messages_repo.list_messages_for_feedback(
+        pool,
+        session_id,
+        limit=settings.feedback_message_max_count,
+    )
     if not message_records:
         raise AppError(
             "MESSAGES_NOT_FOUND",

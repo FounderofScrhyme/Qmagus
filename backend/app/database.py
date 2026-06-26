@@ -6,7 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import settings
 
-engine = create_async_engine(settings.database_url_async, echo=False)
+engine = create_async_engine(
+    settings.database_url_async,
+    echo=False,
+    pool_size=settings.sqlalchemy_pool_size,
+    max_overflow=settings.sqlalchemy_max_overflow,
+    pool_pre_ping=True,
+)
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
 _pool: asyncpg.Pool | None = None
@@ -22,7 +28,11 @@ async def init_pool() -> None:
     global _pool
     async with _pool_lock:
         if _pool is None:
-            _pool = await asyncpg.create_pool(dsn=settings.database_url_raw)
+            _pool = await asyncpg.create_pool(
+                dsn=settings.database_url_raw,
+                min_size=settings.asyncpg_pool_min_size,
+                max_size=settings.asyncpg_pool_max_size,
+            )
 
 
 async def close_pool() -> None:

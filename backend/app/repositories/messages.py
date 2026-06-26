@@ -74,6 +74,7 @@ async def list_messages_for_context(
 async def list_messages_for_feedback(
     pool: asyncpg.Pool,
     session_id: uuid.UUID,
+    limit: int,
 ) -> list[MessageRecord]:
     # NOTE:
     # フィードバック品質は会話全体の流れに依存するため、
@@ -81,10 +82,16 @@ async def list_messages_for_feedback(
     rows = await pool.fetch(
         """
         SELECT id, session_id, role, content, created_at
-        FROM messages
-        WHERE session_id = $1
+        FROM (
+            SELECT id, session_id, role, content, created_at
+            FROM messages
+            WHERE session_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+        ) recent
         ORDER BY created_at ASC
         """,
         session_id,
+        limit,
     )
     return [_to_message_record(row) for row in rows]

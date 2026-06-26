@@ -2,9 +2,8 @@ from collections.abc import AsyncGenerator
 from functools import lru_cache
 from pathlib import Path
 
-from openai import AsyncOpenAI
-
 from app.config import settings
+from app.services.openai_client import get_openai_client
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "conversation.txt"
 
@@ -55,7 +54,7 @@ async def stream_assistant_reply(
     history: list[dict[str, str]],
     user_content: str,
 ) -> AsyncGenerator[str, None]:
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    client = get_openai_client()
     messages = _build_messages(
         scenario_text=scenario_text,
         history=history,

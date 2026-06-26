@@ -10,7 +10,7 @@ from app.database import get_pool_dep
 from app.exceptions import AppError
 from app.repositories import saved_items as saved_items_repo
 from app.repositories import sessions as sessions_repo
-from app.schemas.saved_items import SavedItemCreate, SavedItemRead
+from app.schemas.saved_items import SavedItemCreate, SavedItemRead, SavedItemsBatchCreate
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,32 @@ async def list_saved_items(
         offset=offset,
     )
     return [_to_saved_item_read(row) for row in rows]
+
+
+@router.post("/batch", response_model=list[SavedItemRead], status_code=201)
+async def create_saved_items_batch(
+    body: SavedItemsBatchCreate,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool_dep),
+) -> list[SavedItemRead]:
+    created: list[SavedItemRead] = []
+    checked_sessions: set[uuid.UUID] = set()
+    for item in body.items:
+        if item.session_id not in checked_sessions:
+            await _ensure_owned_session(pool=pool, session_id=item.session_id, user_id=user_id)
+            checked_sessions.add(item.session_id)
+        row = await saved_items_repo.create_saved_item(
+            pool,
+            user_id=user_id,
+            session_id=item.session_id,
+            type_=item.type,
+            original=item.original,
+            corrected=item.corrected,
+            explanation=item.explanation,
+        )
+        created.append(_to_saved_item_read(row))
+    logger.info("Saved item batch created", extra={"user_id": str(user_id)})
+    return created
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)

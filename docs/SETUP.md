@@ -497,6 +497,9 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 #### `frontend/Dockerfile`（開発用）
 
+> この Dockerfile は開発サーバー（`npm run dev`）用。  
+> 本番環境では Cloudflare Pages のビルド/配信を使う。
+
 ```dockerfile
 FROM node:20-slim
 
