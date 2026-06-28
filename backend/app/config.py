@@ -24,7 +24,9 @@ def _normalize_async_database_url(url: str) -> str:
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=("../.env", ".env"),
+        # Docker: project root .env is mounted at /etc/english-project.env
+        # Local: run from backend/ and load ../.env
+        env_file=("/etc/english-project.env", "../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -33,6 +35,9 @@ class Settings(BaseSettings):
     database_url_raw: str = Field(alias="DATABASE_URL_RAW")
     openai_api_key: str = Field(alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+    openai_tts_model: str = Field(default="tts-1", alias="OPENAI_TTS_MODEL")
+    openai_tts_voice: str = Field(default="onyx", alias="OPENAI_TTS_VOICE")
+    openai_transcribe_model: str = Field(default="whisper-1", alias="OPENAI_TRANSCRIBE_MODEL")
     jwt_secret: str = Field(alias="JWT_SECRET")
     jwt_lifetime_seconds: int = Field(default=3600, alias="JWT_LIFETIME_SECONDS")
     cors_origins: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")

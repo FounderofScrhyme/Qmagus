@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { FeedbackItemCard } from '@/components/feedback/FeedbackItemCard'
 import { Button } from '@/components/ui/button'
@@ -14,12 +14,12 @@ function itemKey(item: FeedbackItem, index: number): string {
 
 export function FeedbackPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [items, setItems] = useState<FeedbackItem[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
-  const [savedCount, setSavedCount] = useState(0)
 
   useEffect(() => {
     if (!id) return
@@ -57,8 +57,7 @@ export function FeedbackPage() {
           explanation: item.explanation,
         })),
       )
-      setSavedCount(toSave.length)
-      setSelected(new Set())
+      navigate('/dashboard')
     } catch (err) {
       setError(getErrorMessage(err, '保存に失敗しました'))
     } finally {
@@ -82,15 +81,6 @@ export function FeedbackPage() {
       {error && (
         <p className="text-sm text-destructive" role="alert">
           {error}
-        </p>
-      )}
-
-      {savedCount > 0 && (
-        <p className="text-sm text-primary">
-          {savedCount} 件を保存しました。{' '}
-          <Link to="/review" className="underline underline-offset-4">
-            復習一覧を見る
-          </Link>
         </p>
       )}
 

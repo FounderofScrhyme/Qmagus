@@ -4,10 +4,15 @@ import { useAuthStore } from '@/stores/authStore'
 import type { MessageCreate } from '@/types/messages'
 import type { SessionRead } from '@/types/sessions'
 
+interface StreamErrorOptions {
+  /** True when the backend already persisted the user message before the stream failed. */
+  userMessagePersisted: boolean
+}
+
 interface StreamHandlers {
   onChunk: (content: string) => void
-  onDone: (messageId: string) => void
-  onError: (message: string) => void
+  onDone: (messageId: string) => void | Promise<void>
+  onError: (message: string, options: StreamErrorOptions) => void
 }
 
 async function parseErrorMessage(response: Response): Promise<string> {
@@ -22,33 +27,15 @@ async function parseErrorMessage(response: Response): Promise<string> {
   }
 }
 
-export async function streamMessage(
-  sessionId: string,
-  body: MessageCreate,
+async function readAssistantSseStream(
+  response: Response,
   handlers: StreamHandlers,
-  signal?: AbortSignal,
-): Promise<void> {
-  const token = useAuthStore.getState().token
-
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-    signal,
-  })
-
-  if (!response.ok) {
-    handlers.onError(await parseErrorMessage(response))
-    return
-  }
-
+  userMessagePersisted: boolean,
+): Promise<boolean> {
   const reader = response.body?.getReader()
   if (!reader) {
-    handlers.onError('ストリームを開始できませんでした')
-    return
+    handlers.onError('ストリームを開始できませんでした', { userMessagePersisted })
+    return false
   }
 
   const decoder = new TextDecoder()
@@ -70,21 +57,77 @@ export async function streamMessage(
         handlers.onChunk(parsed.content)
       } else if (event === 'done') {
         const parsed = JSON.parse(data) as { message_id: string }
-        handlers.onDone(parsed.message_id)
-        return
+        await handlers.onDone(parsed.message_id)
+        return true
       } else if (event === 'error') {
         const parsed = JSON.parse(data) as { message: string }
-        handlers.onError(parsed.message)
-        return
+        handlers.onError(parsed.message, { userMessagePersisted })
+        return false
       }
     }
   }
 
   if (assistantText) {
-    handlers.onError('応答が途中で終了しました')
+    handlers.onError('応答が途中で終了しました', { userMessagePersisted })
   } else {
-    handlers.onError('応答を受信できませんでした')
+    handlers.onError('応答を受信できませんでした', { userMessagePersisted })
   }
+  return false
+}
+
+async function postSseStream(
+  url: string,
+  handlers: StreamHandlers,
+  userMessagePersisted: boolean,
+  signal?: AbortSignal,
+  body?: MessageCreate,
+): Promise<boolean> {
+  const token = useAuthStore.getState().token
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+    signal,
+  })
+
+  if (!response.ok) {
+    handlers.onError(await parseErrorMessage(response), { userMessagePersisted: false })
+    return false
+  }
+
+  return readAssistantSseStream(response, handlers, userMessagePersisted)
+}
+
+export async function streamOpeningMessage(
+  sessionId: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return postSseStream(
+    `${API_BASE_URL}/api/sessions/${sessionId}/opening`,
+    handlers,
+    false,
+    signal,
+  )
+}
+
+export async function streamMessage(
+  sessionId: string,
+  body: MessageCreate,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return postSseStream(
+    `${API_BASE_URL}/api/sessions/${sessionId}/messages`,
+    handlers,
+    true,
+    signal,
+    body,
+  )
 }
 
 export async function completeSession(sessionId: string): Promise<SessionRead> {

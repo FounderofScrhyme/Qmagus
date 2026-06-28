@@ -13,7 +13,13 @@ def is_openai_configured() -> bool:
     # NOTE:
     # フェーズ4では SSE を返すため、レスポンス開始後に設定エラーが発生すると
     # HTTP ステータスで失敗を返せない。先に設定妥当性を判定して 4xx/5xx を返せるようにする。
-    return bool(key) and not key.startswith("sk-your-openai-api-key")
+    if not key:
+        return False
+    placeholder_markers = (
+        "sk-your-openai-api-key",
+        "sk-proj-xxxxxxxx",
+    )
+    return not any(marker in key for marker in placeholder_markers)
 
 
 @lru_cache
@@ -28,7 +34,6 @@ def _build_messages(
     *,
     scenario_text: str,
     history: list[dict[str, str]],
-    user_content: str,
 ) -> list[dict[str, str]]:
     system_prompt = load_conversation_prompt()
 
@@ -44,23 +49,35 @@ def _build_messages(
         },
     ]
     messages.extend(history)
-    messages.append({"role": "user", "content": user_content})
     return messages
 
 
-async def stream_assistant_reply(
-    *,
-    scenario_text: str,
-    history: list[dict[str, str]],
-    user_content: str,
+def _build_opening_messages(*, scenario_text: str) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": load_conversation_prompt()},
+        {
+            "role": "system",
+            "content": (
+                "Current scenario context:\n"
+                f"{scenario_text}\n\n"
+                "Stay in-character as the conversation partner. "
+                "You speak first to open the conversation."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Start the conversation now. Greet the learner naturally for this scenario, "
+                "speak first in 1-2 sentences, and invite them to respond."
+            ),
+        },
+    ]
+
+
+async def _stream_chat_completion(
+    messages: list[dict[str, str]],
 ) -> AsyncGenerator[str, None]:
     client = get_openai_client()
-    messages = _build_messages(
-        scenario_text=scenario_text,
-        history=history,
-        user_content=user_content,
-    )
-
     stream = await client.chat.completions.create(
         model=settings.openai_model,
         messages=messages,
@@ -74,4 +91,23 @@ async def stream_assistant_reply(
         delta = chunk.choices[0].delta.content
         if not delta:
             continue
+        yield delta
+
+
+async def stream_assistant_reply(
+    *,
+    scenario_text: str,
+    history: list[dict[str, str]],
+) -> AsyncGenerator[str, None]:
+    messages = _build_messages(
+        scenario_text=scenario_text,
+        history=history,
+    )
+    async for delta in _stream_chat_completion(messages):
+        yield delta
+
+
+async def stream_opening_reply(*, scenario_text: str) -> AsyncGenerator[str, None]:
+    messages = _build_opening_messages(scenario_text=scenario_text)
+    async for delta in _stream_chat_completion(messages):
         yield delta

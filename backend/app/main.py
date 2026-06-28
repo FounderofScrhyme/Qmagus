@@ -17,6 +17,8 @@ from app.routers.feedback import router as feedback_router
 from app.routers.messages import router as messages_router
 from app.routers.saved_items import router as saved_items_router
 from app.routers.sessions import router as sessions_router
+from app.routers.transcribe import router as transcribe_router
+from app.routers.tts import router as tts_router
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -70,6 +72,8 @@ app.include_router(sessions_router)
 app.include_router(messages_router)
 app.include_router(feedback_router)
 app.include_router(saved_items_router)
+app.include_router(transcribe_router)
+app.include_router(tts_router)
 
 
 @app.get("/health")

@@ -13,6 +13,7 @@ from app.repositories import messages as messages_repo
 from app.repositories import sessions as sessions_repo
 from app.schemas.feedback import FeedbackResponse
 from app.services.feedback_service import generate_feedback
+from app.services.openai_errors import format_openai_error
 from app.services.openai_service import is_openai_configured
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,10 @@ async def create_feedback(
         {"role": record.role, "content": record.content}
         for record in message_records
     ]
-    feedback = await generate_feedback(conversation)
+    try:
+        feedback = await generate_feedback(conversation)
+    except Exception as exc:
+        logger.exception("Failed to generate feedback", extra={"user_id": str(user_id)})
+        raise AppError("OPENAI_ERROR", format_openai_error(exc), 502) from exc
     logger.info("Feedback generated", extra={"user_id": str(user_id)})
     return feedback

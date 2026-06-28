@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { MessageComposer } from '@/components/conversation/MessageComposer'
 import { MessageList } from '@/components/conversation/MessageList'
+import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -10,8 +11,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { getErrorMessage } from '@/lib/errors'
-import { completeSession, streamMessage } from '@/lib/messages'
+import { getErrorMessage, getStreamErrorMessage } from '@/lib/errors'
+import { completeSession, streamMessage, streamOpeningMessage } from '@/lib/messages'
 import { getSession } from '@/lib/sessions'
 import { useSessionStore } from '@/stores/sessionStore'
 import type { SessionDetailRead } from '@/types/sessions'
@@ -20,6 +21,7 @@ export function ConversationPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const abortRef = useRef<AbortController | null>(null)
+  const openingRequestedRef = useRef(false)
 
   const [session, setSession] = useState<SessionDetailRead | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -32,63 +34,148 @@ export function ConversationPage() {
   const setMessages = useSessionStore((s) => s.setMessages)
   const addUserMessage = useSessionStore((s) => s.addUserMessage)
   const startStreaming = useSessionStore((s) => s.startStreaming)
-  const appendStreamChunk = useSessionStore((s) => s.appendStreamChunk)
+  const setStreamingContent = useSessionStore((s) => s.setStreamingContent)
   const finishStreaming = useSessionStore((s) => s.finishStreaming)
   const resetStreaming = useSessionStore((s) => s.resetStreaming)
+  const removeLastUserMessage = useSessionStore((s) => s.removeLastUserMessage)
   const clear = useSessionStore((s) => s.clear)
 
-  const loadSession = useCallback(async () => {
-    if (!id) return
-    setIsLoading(true)
-    setError(null)
-    try {
-      const data = await getSession(id)
-      setSession(data)
-      setMessages(data.messages ?? [])
-    } catch (err) {
-      setError(getErrorMessage(err, 'セッションの取得に失敗しました'))
-    } finally {
-      setIsLoading(false)
-    }
-  }, [id, setMessages])
+  const { isSupported: isSpeechSupported, isSpeaking, speak, speakSynced, stop: stopSpeaking } =
+    useSpeechSynthesis()
+
+  const loadSession = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!id) return
+      if (!options?.silent) {
+        setIsLoading(true)
+      }
+      setError(null)
+      try {
+        const data = await getSession(id)
+        setSession(data)
+        setMessages(data.messages ?? [])
+      } catch (err) {
+        setError(getErrorMessage(err, 'セッションの取得に失敗しました'))
+      } finally {
+        if (!options?.silent) {
+          setIsLoading(false)
+        }
+      }
+    },
+    [id, setMessages],
+  )
+
+  useEffect(() => {
+    openingRequestedRef.current = false
+  }, [id])
 
   useEffect(() => {
     void loadSession()
     return () => {
       abortRef.current?.abort()
+      stopSpeaking()
       clear()
     }
-  }, [loadSession, clear])
+  }, [loadSession, clear, stopSpeaking])
+
+  const runAssistantStream = useCallback(
+    async (
+      request: (
+        sessionId: string,
+        handlers: Parameters<typeof streamMessage>[2],
+        signal: AbortSignal,
+      ) => Promise<boolean>,
+      options?: { optimisticUserMessage?: boolean },
+    ) => {
+      if (!id) return false
+
+      startStreaming()
+
+      let fullContent = ''
+      abortRef.current?.abort()
+      abortRef.current = new AbortController()
+
+      const succeeded = await request(
+        id,
+        {
+          onChunk: (chunk) => {
+            fullContent += chunk
+          },
+          onDone: async (messageId) => {
+            if (fullContent.trim()) {
+              await speakSynced(fullContent, setStreamingContent)
+            }
+            finishStreaming(messageId, fullContent)
+          },
+          onError: async (message, { userMessagePersisted }) => {
+            resetStreaming()
+            if (userMessagePersisted) {
+              await loadSession({ silent: true })
+            } else if (options?.optimisticUserMessage) {
+              removeLastUserMessage()
+            }
+            setError(getStreamErrorMessage(message))
+          },
+        },
+        abortRef.current.signal,
+      )
+
+      if (!succeeded) {
+        resetStreaming()
+      }
+
+      return succeeded
+    },
+    [
+      id,
+      startStreaming,
+      setStreamingContent,
+      finishStreaming,
+      speakSynced,
+      resetStreaming,
+      loadSession,
+      removeLastUserMessage,
+    ],
+  )
+
+  useEffect(() => {
+    if (isLoading || !session || session.status !== 'active') return
+    if (messages.length > 0 || openingRequestedRef.current || isStreaming) return
+
+    openingRequestedRef.current = true
+
+    void runAssistantStream((sessionId, handlers, signal) =>
+      streamOpeningMessage(sessionId, handlers, signal),
+    ).then((succeeded) => {
+      if (!succeeded) {
+        openingRequestedRef.current = false
+      }
+    })
+  }, [isLoading, session, messages.length, isStreaming, runAssistantStream])
 
   const handleSend = async (content: string) => {
     if (!id) return
 
+    stopSpeaking()
     addUserMessage(content)
-    startStreaming()
 
-    let fullContent = ''
-    abortRef.current?.abort()
-    abortRef.current = new AbortController()
-
-    await streamMessage(
-      id,
-      { content },
-      {
-        onChunk: (chunk) => {
-          fullContent += chunk
-          appendStreamChunk(chunk)
-        },
-        onDone: (messageId) => {
-          finishStreaming(messageId, fullContent)
-        },
-        onError: async (message) => {
-          resetStreaming()
-          setError(message)
-          await loadSession()
-        },
-      },
-      abortRef.current.signal,
-    )
+    try {
+      const succeeded = await runAssistantStream(
+        (sessionId, handlers, signal) =>
+          streamMessage(sessionId, { content }, handlers, signal),
+        { optimisticUserMessage: true },
+      )
+      if (!succeeded) {
+        throw new Error('message send failed')
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'message send failed') {
+        return
+      }
+      resetStreaming()
+      removeLastUserMessage()
+      setError('メッセージの送信に失敗しました。ネットワーク接続を確認してください。')
+    }
   }
 
   const handleComplete = async () => {
@@ -163,6 +250,7 @@ export function ConversationPage() {
           <CardTitle className="text-sm font-medium">メッセージ</CardTitle>
           <CardDescription className="text-xs">
             Enter で送信、Shift+Enter で改行
+            {isSpeechSupported && isSpeaking && ' · 読み上げ中...'}
           </CardDescription>
         </CardHeader>
         <div className="min-h-0 flex-1">
@@ -170,9 +258,16 @@ export function ConversationPage() {
             messages={messages}
             streamingContent={streamingContent}
             isStreaming={isStreaming}
+            canSpeak={isSpeechSupported}
+            onSpeak={speak}
           />
         </div>
-        <MessageComposer onSend={handleSend} disabled={isStreaming || isCompleting} />
+        <MessageComposer
+          sessionId={session.id}
+          onSend={handleSend}
+          disabled={isStreaming || isCompleting || (messages.length === 0 && !error)}
+          onBeforeListen={stopSpeaking}
+        />
       </Card>
     </div>
   )

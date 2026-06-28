@@ -22,11 +22,11 @@ export function AppLayout() {
 
   return (
     <div className="min-h-svh bg-background text-foreground">
-      <header className="border-b border-border">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-border bg-background">
         <div className="container mx-auto flex h-14 items-center justify-between px-4">
           <div className="flex items-center gap-4">
             <Link to="/dashboard" className="text-sm font-semibold tracking-tight">
-              English Practice
+              Kumagusu
             </Link>
             <nav className="hidden items-center gap-1 sm:flex">
               {NAV_LINKS.map(({ to, label }) => (
@@ -57,8 +57,10 @@ export function AppLayout() {
           </nav>
         </div>
       </header>
-      <main className="container mx-auto p-4 md:p-6">
-        <Outlet />
+      <main className="pt-14">
+        <div className="container mx-auto p-4 md:p-6">
+          <Outlet />
+        </div>
       </main>
     </div>
   )

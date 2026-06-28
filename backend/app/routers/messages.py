@@ -15,7 +15,12 @@ from app.rate_limit import check_rate_limit
 from app.repositories import messages as messages_repo
 from app.repositories import sessions as sessions_repo
 from app.schemas.messages import MessageCreate
-from app.services.openai_service import is_openai_configured, stream_assistant_reply
+from app.services.openai_errors import format_openai_error
+from app.services.openai_service import (
+    is_openai_configured,
+    stream_assistant_reply,
+    stream_opening_reply,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +51,23 @@ async def _get_owned_active_session(
     return session
 
 
-@router.post("/{session_id}/messages")
-async def create_message_and_stream_reply(
-    session_id: uuid.UUID,
-    body: MessageCreate,
-    user_id: uuid.UUID = Depends(get_current_user_id),
-    pool: asyncpg.Pool = Depends(get_pool_dep),
-) -> StreamingResponse:
-    session = await _get_owned_active_session(
-        pool=pool,
-        session_id=session_id,
-        user_id=user_id,
+def _sse_response(event_generator: AsyncGenerator[str, None]) -> StreamingResponse:
+    return StreamingResponse(
+        event_generator,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
+
+
+async def _check_openai_message_rate_limits(
+    *,
+    pool: asyncpg.Pool,
+    user_id: uuid.UUID,
+) -> None:
     user_key = str(user_id)
     limited_minute = await check_rate_limit(
         pool=pool,
@@ -85,6 +95,94 @@ async def create_message_and_stream_reply(
             "Daily message limit exceeded.",
             429,
         )
+
+
+async def _stream_assistant_to_sse(
+    *,
+    pool: asyncpg.Pool,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+    deltas: AsyncGenerator[str, None],
+) -> AsyncGenerator[str, None]:
+    assistant_parts: list[str] = []
+
+    try:
+        async for delta in deltas:
+            assistant_parts.append(delta)
+            yield _format_sse_event("chunk", {"content": delta})
+    except Exception as exc:
+        logger.exception("Failed to stream assistant reply", extra={"user_id": str(user_id)})
+        yield _format_sse_event("error", {"message": format_openai_error(exc)})
+        return
+
+    assistant_text = "".join(assistant_parts).strip()
+    if not assistant_text:
+        yield _format_sse_event("error", {"message": "Assistant response was empty"})
+        return
+
+    assistant_message = await messages_repo.create_message(
+        pool=pool,
+        session_id=session_id,
+        role="assistant",
+        content=assistant_text,
+    )
+    yield _format_sse_event("done", {"message_id": str(assistant_message.id)})
+
+
+@router.post("/{session_id}/opening")
+async def create_opening_message(
+    session_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool_dep),
+) -> StreamingResponse:
+    session = await _get_owned_active_session(
+        pool=pool,
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+    existing_messages = await sessions_repo.list_messages(pool, session_id, limit=1, offset=0)
+    if existing_messages:
+        raise AppError(
+            "OPENING_ALREADY_EXISTS",
+            "Conversation already has messages",
+            409,
+        )
+
+    await _check_openai_message_rate_limits(pool=pool, user_id=user_id)
+
+    if not is_openai_configured():
+        raise AppError(
+            "OPENAI_NOT_CONFIGURED",
+            "OpenAI API key is not configured",
+            503,
+        )
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        async for event in _stream_assistant_to_sse(
+            pool=pool,
+            session_id=session_id,
+            user_id=user_id,
+            deltas=stream_opening_reply(scenario_text=session.scenario_text),
+        ):
+            yield event
+
+    return _sse_response(event_generator())
+
+
+@router.post("/{session_id}/messages")
+async def create_message_and_stream_reply(
+    session_id: uuid.UUID,
+    body: MessageCreate,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool_dep),
+) -> StreamingResponse:
+    session = await _get_owned_active_session(
+        pool=pool,
+        session_id=session_id,
+        user_id=user_id,
+    )
+    await _check_openai_message_rate_limits(pool=pool, user_id=user_id)
 
     if not is_openai_configured():
         raise AppError(
@@ -116,49 +214,15 @@ async def create_message_and_stream_reply(
     ]
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        assistant_parts: list[str] = []
-
-        try:
-            async for delta in stream_assistant_reply(
-                scenario_text=session.scenario_text,
-                history=history,
-                user_content=body.content,
-            ):
-                assistant_parts.append(delta)
-                yield _format_sse_event("chunk", {"content": delta})
-        except Exception:
-            logger.exception("Failed to stream assistant reply", extra={"user_id": str(user_id)})
-            yield _format_sse_event(
-                "error",
-                {"message": "Failed to generate assistant reply"},
-            )
-            return
-
-        assistant_text = "".join(assistant_parts).strip()
-        if not assistant_text:
-            yield _format_sse_event(
-                "error",
-                {"message": "Assistant response was empty"},
-            )
-            return
-
-        assistant_message = await messages_repo.create_message(
+        async for event in _stream_assistant_to_sse(
             pool=pool,
             session_id=session_id,
-            role="assistant",
-            content=assistant_text,
-        )
-        yield _format_sse_event("done", {"message_id": str(assistant_message.id)})
+            user_id=user_id,
+            deltas=stream_assistant_reply(
+                scenario_text=session.scenario_text,
+                history=history,
+            ),
+        ):
+            yield event
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            # NOTE:
-            # SSE をリバースプロキシ経由で安定配信するために、
-            # バッファリング無効化と keep-alive を明示して途切れを防ぐ。
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return _sse_response(event_generator())
