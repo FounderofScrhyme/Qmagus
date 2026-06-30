@@ -28,7 +28,7 @@ async def create_speech(
         )
 
     try:
-        audio = await synthesize_speech(body.text)
+        audio = await synthesize_speech(body.text, tts_voice=body.voice.value if body.voice else None)
     except Exception as exc:
         logger.exception("Failed to synthesize speech")
         raise AppError("OPENAI_TTS_ERROR", format_openai_error(exc), 502) from exc

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Volume2 } from 'lucide-react'
+import { Loader2, Mic, Volume2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -10,35 +10,60 @@ interface MessageBubbleProps {
   message: MessageRead
   canSpeak?: boolean
   onSpeak?: (text: string) => void
+  showRedo?: boolean
+  onRedo?: () => void
+  isRedoing?: boolean
 }
 
-export function MessageBubble({ message, canSpeak, onSpeak }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  canSpeak,
+  onSpeak,
+  showRedo,
+  onRedo,
+  isRedoing,
+}: MessageBubbleProps) {
   const isUser = message.role === 'user'
 
   return (
-    <div className={cn('flex items-end gap-1', isUser ? 'justify-end' : 'justify-start')}>
-      {!isUser && canSpeak && onSpeak && (
+    <div className={cn('flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}>
+      <div className={cn('flex items-end gap-1', isUser ? 'justify-end' : 'justify-start')}>
+        {!isUser && canSpeak && onSpeak && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0"
+            onClick={() => onSpeak(message.content)}
+            aria-label="読み上げる"
+          >
+            <Volume2 className="size-4" />
+          </Button>
+        )}
+        <div
+          className={cn(
+            'max-w-[85%] rounded-2xl px-4 py-2 text-sm leading-relaxed',
+            isUser
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted text-foreground',
+          )}
+        >
+          {message.content}
+        </div>
+      </div>
+      {isUser && showRedo && onRedo && (
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="size-8 shrink-0"
-          onClick={() => onSpeak(message.content)}
-          aria-label="読み上げる"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+          onClick={onRedo}
+          disabled={isRedoing}
         >
-          <Volume2 className="size-4" />
+          {isRedoing ? <Loader2 className="size-3.5 animate-spin" /> : <Mic className="size-3.5" />}
+          発話し直す
         </Button>
       )}
-      <div
-        className={cn(
-          'max-w-[85%] rounded-2xl px-4 py-2 text-sm leading-relaxed',
-          isUser
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-muted text-foreground',
-        )}
-      >
-        {message.content}
-      </div>
     </div>
   )
 }
@@ -49,6 +74,10 @@ interface MessageListProps {
   isStreaming?: boolean
   canSpeak?: boolean
   onSpeak?: (text: string) => void
+  lastUserMessageId?: string | null
+  canRedoUserMessage?: boolean
+  onRedoUserMessage?: () => void
+  isRedoing?: boolean
 }
 
 export function MessageList({
@@ -57,6 +86,10 @@ export function MessageList({
   isStreaming,
   canSpeak,
   onSpeak,
+  lastUserMessageId,
+  canRedoUserMessage,
+  onRedoUserMessage,
+  isRedoing,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -81,6 +114,16 @@ export function MessageList({
             message={message}
             canSpeak={canSpeak && message.role === 'assistant'}
             onSpeak={onSpeak}
+            showRedo={
+              Boolean(
+                canRedoUserMessage &&
+                  onRedoUserMessage &&
+                  message.role === 'user' &&
+                  message.id === lastUserMessageId,
+              )
+            }
+            onRedo={onRedoUserMessage}
+            isRedoing={isRedoing}
           />
         ))}
         {isStreaming && (

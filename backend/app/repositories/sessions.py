@@ -10,6 +10,11 @@ class SessionRecord:
     id: uuid.UUID
     user_id: uuid.UUID
     scenario_text: str
+    setting: str | None
+    user_role: str | None
+    ai_role: str | None
+    goal: str | None
+    tts_voice: str
     status: str
     created_at: datetime
     completed_at: datetime | None
@@ -23,11 +28,22 @@ class MessageRecord:
     created_at: datetime
 
 
+_SESSION_COLUMNS = """
+    id, user_id, scenario_text, setting, user_role, ai_role, goal, tts_voice,
+    status, created_at, completed_at
+"""
+
+
 def _to_session_record(row: asyncpg.Record) -> SessionRecord:
     return SessionRecord(
         id=row["id"],
         user_id=row["user_id"],
         scenario_text=row["scenario_text"],
+        setting=row["setting"],
+        user_role=row["user_role"],
+        ai_role=row["ai_role"],
+        goal=row["goal"],
+        tts_voice=row["tts_voice"],
         status=row["status"],
         created_at=row["created_at"],
         completed_at=row["completed_at"],
@@ -46,16 +62,29 @@ def _to_message_record(row: asyncpg.Record) -> MessageRecord:
 async def create_session(
     pool: asyncpg.Pool,
     user_id: uuid.UUID,
+    *,
     scenario_text: str,
+    setting: str,
+    user_role: str,
+    ai_role: str,
+    goal: str,
+    tts_voice: str,
 ) -> SessionRecord:
     row = await pool.fetchrow(
-        """
-        INSERT INTO conversation_sessions (user_id, scenario_text)
-        VALUES ($1, $2)
-        RETURNING id, user_id, scenario_text, status, created_at, completed_at
+        f"""
+        INSERT INTO conversation_sessions (
+            user_id, scenario_text, setting, user_role, ai_role, goal, tts_voice
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING {_SESSION_COLUMNS}
         """,
         user_id,
         scenario_text,
+        setting,
+        user_role,
+        ai_role,
+        goal,
+        tts_voice,
     )
     if row is None:
         raise RuntimeError("Failed to create session")
@@ -69,8 +98,8 @@ async def list_sessions(
     offset: int,
 ) -> list[SessionRecord]:
     rows = await pool.fetch(
-        """
-        SELECT id, user_id, scenario_text, status, created_at, completed_at
+        f"""
+        SELECT {_SESSION_COLUMNS}
         FROM conversation_sessions
         WHERE user_id = $1
         ORDER BY created_at DESC
@@ -88,8 +117,8 @@ async def get_session(
     session_id: uuid.UUID,
 ) -> SessionRecord | None:
     row = await pool.fetchrow(
-        """
-        SELECT id, user_id, scenario_text, status, created_at, completed_at
+        f"""
+        SELECT {_SESSION_COLUMNS}
         FROM conversation_sessions
         WHERE id = $1
         """,
@@ -124,11 +153,11 @@ async def complete_session(
     session_id: uuid.UUID,
 ) -> SessionRecord | None:
     row = await pool.fetchrow(
-        """
+        f"""
         UPDATE conversation_sessions
         SET status = 'completed', completed_at = now()
         WHERE id = $1 AND status = 'active'
-        RETURNING id, user_id, scenario_text, status, created_at, completed_at
+        RETURNING {_SESSION_COLUMNS}
         """,
         session_id,
     )

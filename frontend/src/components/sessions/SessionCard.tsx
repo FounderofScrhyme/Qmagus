@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { formatDateTime, truncate } from '@/lib/format'
-import type { SessionRead } from '@/types/sessions'
+import { sessionSubtitle, sessionTitle, type SessionRead } from '@/types/sessions'
 
 const STATUS_LABEL: Record<SessionRead['status'], string> = {
   active: '進行中',
@@ -31,7 +31,7 @@ export function SessionCard({ session }: SessionCardProps) {
         <CardHeader className="gap-2">
           <div className="flex items-start justify-between gap-3">
             <CardTitle className="text-base leading-snug">
-              {truncate(session.scenario_text, 80)}
+              {truncate(sessionTitle(session), 80)}
             </CardTitle>
             <span
               className={
@@ -47,7 +47,7 @@ export function SessionCard({ session }: SessionCardProps) {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            {truncate(session.scenario_text, 160)}
+            {truncate(sessionSubtitle(session), 160)}
           </p>
         </CardContent>
       </Card>

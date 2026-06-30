@@ -6,11 +6,20 @@ def build_whisper_prompt(
     *,
     scenario_text: str,
     messages: list[dict[str, str]],
+    setting: str | None = None,
+    user_role: str | None = None,
+    ai_role: str | None = None,
+    goal: str | None = None,
 ) -> str:
     parts: list[str] = []
-    scenario = scenario_text.strip().replace("\n", " ")
-    if scenario:
-        parts.append(scenario[:300])
+    if setting and user_role and ai_role and goal:
+        parts.append(
+            f"{setting}. Learner role: {user_role}. Partner role: {ai_role}. Goal: {goal}"[:300]
+        )
+    else:
+        scenario = scenario_text.strip().replace("\n", " ")
+        if scenario:
+            parts.append(scenario[:300])
 
     for message in messages[-8:]:
         role = message.get("role", "")

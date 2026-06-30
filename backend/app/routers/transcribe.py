@@ -90,6 +90,10 @@ async def transcribe_session_audio(
     prompt = build_whisper_prompt(
         scenario_text=session.scenario_text,
         messages=context_messages,
+        setting=session.setting,
+        user_role=session.user_role,
+        ai_role=session.ai_role,
+        goal=session.goal,
     )
 
     try:

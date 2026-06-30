@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { MessageComposer } from '@/components/conversation/MessageComposer'
@@ -12,10 +12,11 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { getErrorMessage, getStreamErrorMessage } from '@/lib/errors'
-import { completeSession, streamMessage, streamOpeningMessage } from '@/lib/messages'
+import { completeSession, streamMessage, streamOpeningMessage, undoLastTurn } from '@/lib/messages'
 import { getSession } from '@/lib/sessions'
 import { useSessionStore } from '@/stores/sessionStore'
 import type { SessionDetailRead } from '@/types/sessions'
+import { sessionTitle } from '@/types/sessions'
 
 export function ConversationPage() {
   const { id } = useParams<{ id: string }>()
@@ -27,6 +28,8 @@ export function ConversationPage() {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isCompleting, setIsCompleting] = useState(false)
+  const [isUndoing, setIsUndoing] = useState(false)
+  const [rerecordNonce, setRerecordNonce] = useState(0)
 
   const messages = useSessionStore((s) => s.messages)
   const streamingContent = useSessionStore((s) => s.streamingContent)
@@ -41,7 +44,16 @@ export function ConversationPage() {
   const clear = useSessionStore((s) => s.clear)
 
   const { isSupported: isSpeechSupported, isSpeaking, speak, speakSynced, stop: stopSpeaking } =
-    useSpeechSynthesis()
+    useSpeechSynthesis(session?.tts_voice ?? 'male')
+
+  const lastUserMessageId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user') {
+        return messages[index].id
+      }
+    }
+    return null
+  }, [messages])
 
   const loadSession = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -178,6 +190,24 @@ export function ConversationPage() {
     }
   }
 
+  const handleUndoLastTurnAndRerecord = async () => {
+    if (!id || isStreaming || isUndoing) return
+
+    stopSpeaking()
+    setIsUndoing(true)
+    setError(null)
+
+    try {
+      const result = await undoLastTurn(id)
+      setMessages(result.messages)
+      setRerecordNonce((nonce) => nonce + 1)
+    } catch (err) {
+      setError(getErrorMessage(err, 'メッセージの取り消しに失敗しました'))
+    } finally {
+      setIsUndoing(false)
+    }
+  }
+
   const handleComplete = async () => {
     if (!id) return
     setIsCompleting(true)
@@ -227,7 +257,7 @@ export function ConversationPage() {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight">会話</h1>
-          <p className="truncate text-sm text-muted-foreground">{session.scenario_text}</p>
+          <p className="truncate text-sm text-muted-foreground">{sessionTitle(session)}</p>
         </div>
         <Button
           variant="outline"
@@ -260,13 +290,18 @@ export function ConversationPage() {
             isStreaming={isStreaming}
             canSpeak={isSpeechSupported}
             onSpeak={speak}
+            lastUserMessageId={lastUserMessageId}
+            canRedoUserMessage={!isStreaming && !isCompleting && !isUndoing}
+            onRedoUserMessage={() => void handleUndoLastTurnAndRerecord()}
+            isRedoing={isUndoing}
           />
         </div>
         <MessageComposer
           sessionId={session.id}
           onSend={handleSend}
-          disabled={isStreaming || isCompleting || (messages.length === 0 && !error)}
+          disabled={isStreaming || isCompleting || isUndoing || (messages.length === 0 && !error)}
           onBeforeListen={stopSpeaking}
+          pendingRerecord={rerecordNonce}
         />
       </Card>
     </div>

@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { AppLayout } from '@/components/layout/AppLayout'
+import { ThemeProvider } from '@/components/theme/ThemeProvider'
 import { ConversationPage } from '@/pages/ConversationPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { FeedbackPage } from '@/pages/FeedbackPage'
@@ -47,7 +48,8 @@ function AuthHydrator({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <BrowserRouter>
-      <AuthHydrator>
+      <ThemeProvider>
+        <AuthHydrator>
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
@@ -65,7 +67,8 @@ function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </AuthHydrator>
+        </AuthHydrator>
+      </ThemeProvider>
     </BrowserRouter>
   )
 }

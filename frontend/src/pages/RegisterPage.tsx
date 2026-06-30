@@ -2,6 +2,7 @@ import { type FormEvent, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
+import { PublicThemeToggle } from '@/components/theme/PublicThemeToggle'
 import {
   Card,
   CardContent,
@@ -40,6 +41,7 @@ export function RegisterPage() {
 
   return (
     <div className="flex min-h-svh items-center justify-center bg-background p-6">
+      <PublicThemeToggle />
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>新規登録</CardTitle>

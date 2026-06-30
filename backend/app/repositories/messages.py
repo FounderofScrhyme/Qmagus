@@ -95,3 +95,28 @@ async def list_messages_for_feedback(
         limit,
     )
     return [_to_message_record(row) for row in rows]
+
+
+async def delete_last_user_turn(
+    pool: asyncpg.Pool,
+    session_id: uuid.UUID,
+) -> list[MessageRecord]:
+    rows = await pool.fetch(
+        """
+        WITH last_user AS (
+            SELECT created_at
+            FROM messages
+            WHERE session_id = $1 AND role = 'user'
+            ORDER BY created_at DESC
+            LIMIT 1
+        )
+        DELETE FROM messages m
+        USING last_user lu
+        WHERE m.session_id = $1
+          AND m.created_at >= lu.created_at
+          AND EXISTS (SELECT 1 FROM last_user)
+        RETURNING m.id, m.session_id, m.role, m.content, m.created_at
+        """,
+        session_id,
+    )
+    return [_to_message_record(row) for row in rows]

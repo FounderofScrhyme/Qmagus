@@ -3,6 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { filenameForMimeType, pickRecorderMimeType, transcribeAudio } from '@/lib/transcribe'
 
 const MAX_RECORDING_MS = 60_000
+export const WAVEFORM_BAR_COUNT = 24
+
+function createIdleWaveform(): number[] {
+  return Array.from({ length: WAVEFORM_BAR_COUNT }, () => 0.08)
+}
 
 interface UseVoiceTranscriptionOptions {
   sessionId: string
@@ -13,6 +18,7 @@ export function useVoiceTranscription({ sessionId, onTranscript }: UseVoiceTrans
   const [isSupported, setIsSupported] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [waveformLevels, setWaveformLevels] = useState<number[]>(createIdleWaveform)
   const [error, setError] = useState<string | null>(null)
 
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -22,15 +28,64 @@ export function useVoiceTranscription({ sessionId, onTranscript }: UseVoiceTrans
   const abortRef = useRef<AbortController | null>(null)
   const maxDurationTimerRef = useRef<number | null>(null)
   const onTranscriptRef = useRef(onTranscript)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const levelFrameRef = useRef<number | null>(null)
 
   useEffect(() => {
     onTranscriptRef.current = onTranscript
   }, [onTranscript])
 
+  const stopWaveformMonitor = useCallback(() => {
+    if (levelFrameRef.current !== null) {
+      cancelAnimationFrame(levelFrameRef.current)
+      levelFrameRef.current = null
+    }
+    void audioContextRef.current?.close()
+    audioContextRef.current = null
+    setWaveformLevels(createIdleWaveform())
+  }, [])
+
   const releaseMicrophone = useCallback(() => {
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
     mediaStreamRef.current = null
-  }, [])
+    stopWaveformMonitor()
+  }, [stopWaveformMonitor])
+
+  const startWaveformMonitor = useCallback((stream: MediaStream) => {
+    stopWaveformMonitor()
+
+    const audioContext = new AudioContext()
+    const analyser = audioContext.createAnalyser()
+    analyser.fftSize = 256
+    analyser.smoothingTimeConstant = 0.5
+    const source = audioContext.createMediaStreamSource(stream)
+    source.connect(analyser)
+    audioContextRef.current = audioContext
+
+    const timeData = new Uint8Array(analyser.fftSize)
+
+    const tick = () => {
+      analyser.getByteTimeDomainData(timeData)
+
+      const levels = Array.from({ length: WAVEFORM_BAR_COUNT }, (_, index) => {
+        const start = Math.floor((index / WAVEFORM_BAR_COUNT) * timeData.length)
+        const end = Math.floor(((index + 1) / WAVEFORM_BAR_COUNT) * timeData.length)
+
+        let peak = 0
+        for (let i = start; i < end; i++) {
+          const amplitude = Math.abs(timeData[i] - 128) / 128
+          if (amplitude > peak) peak = amplitude
+        }
+
+        const boosted = Math.pow(peak, 0.6) * 4.5
+        return Math.min(1, Math.max(0.08, boosted))
+      })
+
+      setWaveformLevels(levels)
+      levelFrameRef.current = requestAnimationFrame(tick)
+    }
+    tick()
+  }, [stopWaveformMonitor])
 
   const clearMaxDurationTimer = useCallback(() => {
     if (maxDurationTimerRef.current !== null) {
@@ -132,6 +187,7 @@ export function useVoiceTranscription({ sessionId, onTranscript }: UseVoiceTrans
         },
       })
       mediaStreamRef.current = stream
+      startWaveformMonitor(stream)
 
       const mimeType = pickRecorderMimeType()
       mimeTypeRef.current = mimeType
@@ -156,7 +212,7 @@ export function useVoiceTranscription({ sessionId, onTranscript }: UseVoiceTrans
       releaseMicrophone()
       setError('マイクへのアクセスが拒否されました。ブラウザの設定を確認してください。')
     }
-  }, [sessionId, clearMaxDurationTimer, releaseMicrophone, stopRecording])
+  }, [sessionId, clearMaxDurationTimer, releaseMicrophone, startWaveformMonitor, stopRecording])
 
   const cancel = useCallback(() => {
     clearMaxDurationTimer()
@@ -181,6 +237,7 @@ export function useVoiceTranscription({ sessionId, onTranscript }: UseVoiceTrans
     isRecording,
     isTranscribing,
     isListening: isRecording || isTranscribing,
+    waveformLevels,
     error,
     startRecording,
     stopRecording,

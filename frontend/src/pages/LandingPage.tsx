@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
+import { PublicThemeToggle } from '@/components/theme/PublicThemeToggle'
 import {
   Card,
   CardContent,
@@ -12,6 +13,7 @@ import {
 export function LandingPage() {
   return (
     <div className="min-h-svh bg-background text-foreground">
+      <PublicThemeToggle />
       <main className="container mx-auto flex min-h-svh flex-col items-center justify-center p-6">
         <Card className="w-full max-w-lg">
           <CardHeader className="text-center">

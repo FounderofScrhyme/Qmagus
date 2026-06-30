@@ -32,37 +32,25 @@ def load_conversation_prompt() -> str:
 
 def _build_messages(
     *,
-    scenario_text: str,
+    scenario_prompt: str,
     history: list[dict[str, str]],
 ) -> list[dict[str, str]]:
     system_prompt = load_conversation_prompt()
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
-        {
-            "role": "system",
-            "content": (
-                "Current scenario context:\n"
-                f"{scenario_text}\n\n"
-                "Stay in-character as the conversation partner."
-            ),
-        },
+        {"role": "system", "content": scenario_prompt},
     ]
     messages.extend(history)
     return messages
 
 
-def _build_opening_messages(*, scenario_text: str) -> list[dict[str, str]]:
+def _build_opening_messages(*, scenario_prompt: str) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": load_conversation_prompt()},
         {
             "role": "system",
-            "content": (
-                "Current scenario context:\n"
-                f"{scenario_text}\n\n"
-                "Stay in-character as the conversation partner. "
-                "You speak first to open the conversation."
-            ),
+            "content": f"{scenario_prompt}\n\nYou speak first to open the conversation.",
         },
         {
             "role": "user",
@@ -96,18 +84,18 @@ async def _stream_chat_completion(
 
 async def stream_assistant_reply(
     *,
-    scenario_text: str,
+    scenario_prompt: str,
     history: list[dict[str, str]],
 ) -> AsyncGenerator[str, None]:
     messages = _build_messages(
-        scenario_text=scenario_text,
+        scenario_prompt=scenario_prompt,
         history=history,
     )
     async for delta in _stream_chat_completion(messages):
         yield delta
 
 
-async def stream_opening_reply(*, scenario_text: str) -> AsyncGenerator[str, None]:
-    messages = _build_opening_messages(scenario_text=scenario_text)
+async def stream_opening_reply(*, scenario_prompt: str) -> AsyncGenerator[str, None]:
+    messages = _build_opening_messages(scenario_prompt=scenario_prompt)
     async for delta in _stream_chat_completion(messages):
         yield delta

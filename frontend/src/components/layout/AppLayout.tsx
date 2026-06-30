@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
+import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -45,7 +46,8 @@ export function AppLayout() {
               ))}
             </nav>
           </div>
-          <nav className="flex items-center gap-3">
+          <nav className="flex items-center gap-2">
+            <ThemeToggle />
             {user && (
               <span className="hidden text-sm text-muted-foreground md:inline">
                 {user.email}

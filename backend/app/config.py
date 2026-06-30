@@ -78,6 +78,7 @@ class Settings(BaseSettings):
 
     password_min_length: int = Field(default=8, alias="PASSWORD_MIN_LENGTH")
     scenario_text_max_length: int = Field(default=2000, alias="SCENARIO_TEXT_MAX_LENGTH")
+    scenario_field_max_length: int = Field(default=500, alias="SCENARIO_FIELD_MAX_LENGTH")
     feedback_message_max_count: int = Field(default=100, alias="FEEDBACK_MESSAGE_MAX_COUNT")
     session_list_default_limit: int = Field(default=20, alias="SESSION_LIST_DEFAULT_LIMIT")
     session_list_max_limit: int = Field(default=100, alias="SESSION_LIST_MAX_LIMIT")

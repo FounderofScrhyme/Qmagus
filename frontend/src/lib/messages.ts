@@ -1,7 +1,7 @@
 import { API_BASE_URL, api } from '@/lib/api'
 import { parseSseChunk } from '@/lib/sse'
 import { useAuthStore } from '@/stores/authStore'
-import type { MessageCreate } from '@/types/messages'
+import type { MessageCreate, UndoLastTurnResponse } from '@/types/messages'
 import type { SessionRead } from '@/types/sessions'
 
 interface StreamErrorOptions {
@@ -132,5 +132,12 @@ export async function streamMessage(
 
 export async function completeSession(sessionId: string): Promise<SessionRead> {
   const { data } = await api.post<SessionRead>(`/api/sessions/${sessionId}/complete`)
+  return data
+}
+
+export async function undoLastTurn(sessionId: string): Promise<UndoLastTurnResponse> {
+  const { data } = await api.delete<UndoLastTurnResponse>(
+    `/api/sessions/${sessionId}/messages/last-turn`,
+  )
   return data
 }

@@ -14,13 +14,14 @@ from app.exceptions import AppError
 from app.rate_limit import check_rate_limit
 from app.repositories import messages as messages_repo
 from app.repositories import sessions as sessions_repo
-from app.schemas.messages import MessageCreate
+from app.schemas.messages import MessageCreate, MessageRead, UndoLastTurnResponse
 from app.services.openai_errors import format_openai_error
 from app.services.openai_service import (
     is_openai_configured,
     stream_assistant_reply,
     stream_opening_reply,
 )
+from app.services.scenario_service import build_scenario_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,13 @@ async def create_opening_message(
         session_id=session_id,
         user_id=user_id,
     )
+    scenario_prompt = build_scenario_prompt(
+        setting=session.setting,
+        user_role=session.user_role,
+        ai_role=session.ai_role,
+        goal=session.goal,
+        scenario_text=session.scenario_text,
+    )
 
     existing_messages = await sessions_repo.list_messages(pool, session_id, limit=1, offset=0)
     if existing_messages:
@@ -163,11 +171,51 @@ async def create_opening_message(
             pool=pool,
             session_id=session_id,
             user_id=user_id,
-            deltas=stream_opening_reply(scenario_text=session.scenario_text),
+            deltas=stream_opening_reply(scenario_prompt=scenario_prompt),
         ):
             yield event
 
     return _sse_response(event_generator())
+
+
+@router.delete("/{session_id}/messages/last-turn", response_model=UndoLastTurnResponse)
+async def undo_last_turn(
+    session_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool_dep),
+) -> UndoLastTurnResponse:
+    await _get_owned_active_session(
+        pool=pool,
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+    deleted = await messages_repo.delete_last_user_turn(pool, session_id)
+    if not deleted:
+        raise AppError(
+            "NO_USER_MESSAGE_TO_UNDO",
+            "No user message to undo",
+            400,
+        )
+
+    remaining = await sessions_repo.list_messages(
+        pool,
+        session_id,
+        limit=settings.message_list_max_limit,
+        offset=0,
+    )
+    logger.info("Last user turn undone", extra={"user_id": str(user_id)})
+    return UndoLastTurnResponse(
+        messages=[
+            MessageRead(
+                id=message.id,
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+            )
+            for message in remaining
+        ],
+    )
 
 
 @router.post("/{session_id}/messages")
@@ -181,6 +229,13 @@ async def create_message_and_stream_reply(
         pool=pool,
         session_id=session_id,
         user_id=user_id,
+    )
+    scenario_prompt = build_scenario_prompt(
+        setting=session.setting,
+        user_role=session.user_role,
+        ai_role=session.ai_role,
+        goal=session.goal,
+        scenario_text=session.scenario_text,
     )
     await _check_openai_message_rate_limits(pool=pool, user_id=user_id)
 
@@ -219,7 +274,7 @@ async def create_message_and_stream_reply(
             session_id=session_id,
             user_id=user_id,
             deltas=stream_assistant_reply(
-                scenario_text=session.scenario_text,
+                scenario_prompt=scenario_prompt,
                 history=history,
             ),
         ):
